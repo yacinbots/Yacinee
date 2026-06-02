@@ -1,99 +1,47 @@
-name: Free VPS with VLESS TLS
+name: Deploy VLESS WS TLS — Cloudflare Workers
+
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
+
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 9999
+
     steps:
-      - name: Update & Install Dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y curl openssl
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Install ngrok
-        run: |
-          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
-            | sudo tee /etc/apt/sources.list.d/ngrok.list
-          sudo apt-get update -y
-          sudo apt-get install -y ngrok
+      - name: Install Wrangler
+        run: npm install -g wrangler
 
-      - name: Authenticate ngrok
+      - name: Download EDtunnel worker
         run: |
-          ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
+          mkdir -p dist
+          curl -sL https://raw.githubusercontent.com/6Kmfi6HP/EDtunnel/master/_worker.js -o dist/worker.js
 
-      - name: Install Xray
+      - name: Create wrangler.toml
         run: |
-          curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o install-xray.sh
-          sudo bash install-xray.sh  install
+          cat > wrangler.toml << EOF
+          name = "vless-ws-tls"
+          main = "dist/worker.js"
+          compatibility_date = "2024-01-01"
+          workers_dev = true
 
-      - name: Generate UUID and TLS Certificate
-        run: |
-          UUID=$(sudo xray uuid)
-          echo "UUID=$UUID" >> $GITHUB_ENV
-          sudo mkdir -p /etc/xray
-          sudo openssl req -x509 -newkey rsa:4096 \
-            -keyout /etc/xray/key.pem \
-            -out /etc/xray/cert.pem \
-            -days 365 -nodes \
-            -subj "/CN=myserver"
+          [vars]
+          UUID = "${{ secrets.UUID }}"
 
-      - name: Configure Xray VLESS + WS + TLS
-        run: |
-          sudo tee /usr/local/etc/xray/config.json > /dev/null << EOF
-          {
-            "inbounds": [{
-              "port": 8080,
-              "protocol": "vless",
-              "settings": {
-                "clients": [{"id": "$UUID", "level": 0}],
-                "decryption": "none"
-              },
-              "streamSettings": {
-                "network": "ws",
-                "security": "tls",
-                "tlsSettings": {
-                  "certificates": [{
-                    "certificateFile": "/etc/xray/cert.pem",
-                    "keyFile": "/etc/xray/key.pem"
-                  }],
-                  "allowInsecure": true
-                },
-                "wsSettings": {"path": "/vless"}
-              }
-            }],
-            "outbounds": [{"protocol": "freedom"}]
-          }
+          [observability.logs]
+          enabled = true
+          invocation_logs = true
           EOF
-          sudo systemctl restart xray
 
-      - name: Start ngrok Tunnel for VLESS
-        run: |
-          ngrok tcp 8080 --log=stdout &
-          sleep 5
-
-          TUNNEL_INFO=$(curl -s http://localhost:4040/api/tunnels)
-          VLESS_URL=$(echo "$TUNNEL_INFO" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          print(data['tunnels'][0]['public_url'])
-          ")
-
-          HOST=$(echo "$VLESS_URL" | sed 's/tcp:\/\///' | cut -d: -f1)
-          PORT=$(echo "$VLESS_URL" | sed 's/tcp:\/\///' | cut -d: -f2)
-
-          VLESS_LINK="vless://$UUID@$HOST:$PORT?encryption=none&type=ws&security=tls&path=%2Fvless&allowInsecure=1&sni=myserver#MyVPS-TLS"
-
-          echo "============================================"
-          echo "✅ VLESS TLS Link:"
-          echo "$VLESS_LINK"
-          echo "============================================"
-
-      - name: Keep VPS Alive
-        run: |
-          while true; do
-            sleep 60
-            echo "⏳ VPS still running... $(date)"
-          done
+      - name: Deploy to Cloudflare Workers
+        run: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
