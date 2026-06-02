@@ -27,7 +27,7 @@ jobs:
       - name: Install Xray
         run: |
           curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o install-xray.sh
-          sudo bash install-xray.sh @ install
+          sudo bash install-xray.sh  install
 
       - name: Generate UUID and TLS Certificate
         run: |
