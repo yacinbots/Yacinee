@@ -26,11 +26,12 @@ jobs:
 
       - name: Install Xray
         run: |
-          bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+          curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o install-xray.sh
+          sudo bash install-xray.sh @ install
 
       - name: Generate UUID and TLS Certificate
         run: |
-          UUID=$(xray uuid)
+          UUID=$(sudo xray uuid)
           echo "UUID=$UUID" >> $GITHUB_ENV
           sudo mkdir -p /etc/xray
           sudo openssl req -x509 -newkey rsa:4096 \
@@ -41,31 +42,31 @@ jobs:
 
       - name: Configure Xray VLESS + WS + TLS
         run: |
-          sudo bash -c "cat > /usr/local/etc/xray/config.json << 'EOF'
+          sudo tee /usr/local/etc/xray/config.json > /dev/null << EOF
           {
-            \"inbounds\": [{
-              \"port\": 8080,
-              \"protocol\": \"vless\",
-              \"settings\": {
-                \"clients\": [{\"id\": \"$UUID\", \"level\": 0}],
-                \"decryption\": \"none\"
+            "inbounds": [{
+              "port": 8080,
+              "protocol": "vless",
+              "settings": {
+                "clients": [{"id": "$UUID", "level": 0}],
+                "decryption": "none"
               },
-              \"streamSettings\": {
-                \"network\": \"ws\",
-                \"security\": \"tls\",
-                \"tlsSettings\": {
-                  \"certificates\": [{
-                    \"certificateFile\": \"/etc/xray/cert.pem\",
-                    \"keyFile\": \"/etc/xray/key.pem\"
+              "streamSettings": {
+                "network": "ws",
+                "security": "tls",
+                "tlsSettings": {
+                  "certificates": [{
+                    "certificateFile": "/etc/xray/cert.pem",
+                    "keyFile": "/etc/xray/key.pem"
                   }],
-                  \"allowInsecure\": true
+                  "allowInsecure": true
                 },
-                \"wsSettings\": {\"path\": \"/vless\"}
+                "wsSettings": {"path": "/vless"}
               }
             }],
-            \"outbounds\": [{\"protocol\": \"freedom\"}]
+            "outbounds": [{"protocol": "freedom"}]
           }
-          EOF"
+          EOF
           sudo systemctl restart xray
 
       - name: Start ngrok Tunnel for VLESS
